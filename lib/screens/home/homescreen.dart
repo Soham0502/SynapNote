@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_flutter/lucide_flutter.dart';
 import 'package:sahayak_ui/models/analysis_models.dart';
 import 'package:sahayak_ui/providers/ai_provider.dart';
+import 'package:sahayak_ui/providers/text_analysis_provider.dart';
+import 'package:sahayak_ui/widgets/highlighted_text_widget.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -13,6 +15,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   final TextEditingController _noteController = TextEditingController();
+  bool _useGeminiAnalysis = true;
 
   @override
   void dispose() {
@@ -29,37 +32,46 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       return;
     }
 
-    // Clear previous results before starting a new analysis
-    ref.read(analysisResultProvider.notifier).state = null;
+    if (_useGeminiAnalysis) {
+      // Use Gemini API for analysis
+      await ref.read(textAnalysisProvider.notifier).analyzeText(_noteController.text);
+    } else {
+      // Use original local analysis
+      // Clear previous results before starting a new analysis
+      ref.read(analysisResultProvider.notifier).state = null;
 
-    // Set loading state to true
-    ref.read(isLoadingProvider.notifier).state = true;
+      // Set loading state to true
+      ref.read(isLoadingProvider.notifier).state = true;
 
-    try {
-      // Call the AI service via the provider
-      final result = await ref
-          .read(aiServiceProvider)
-          .analyzeText(_noteController.text);
+      try {
+        // Call the AI service via the provider
+        final result = await ref
+            .read(aiServiceProvider)
+            .analyzeText(_noteController.text);
 
-      // Save the result to the provider, which will update the UI
-      ref.read(analysisResultProvider.notifier).state = result;
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text("An error occurred: $e")));
+        // Save the result to the provider, which will update the UI
+        ref.read(analysisResultProvider.notifier).state = result;
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text("An error occurred: $e")));
+        }
+      } finally {
+        // Set loading state back to false
+        ref.read(isLoadingProvider.notifier).state = false;
       }
-    } finally {
-      // Set loading state back to false
-      ref.read(isLoadingProvider.notifier).state = false;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     // Watch providers to rebuild the UI when state changes
-    final isLoading = ref.watch(isLoadingProvider);
+    final isLoading = _useGeminiAnalysis 
+        ? ref.watch(textAnalysisProvider).isLoading
+        : ref.watch(isLoadingProvider);
     final analysisResult = ref.watch(analysisResultProvider);
+    final textAnalysisState = ref.watch(textAnalysisProvider);
 
     return Scaffold(
       backgroundColor: Colors.grey[100],
@@ -133,6 +145,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 20),
+                  // Analysis mode toggle
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.9),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text('Analysis Mode: '),
+                        Switch(
+                          value: _useGeminiAnalysis,
+                          onChanged: (value) {
+                            setState(() {
+                              _useGeminiAnalysis = value;
+                            });
+                          },
+                          activeColor: const Color(0xFF7846EC),
+                        ),
+                        Text(_useGeminiAnalysis ? 'Gemini AI' : 'Local'),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 20),
                   // --- Your Input Card UI ---
@@ -236,10 +273,191 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   const SizedBox(height: 20),
                   // --- Results Section ---
                   // This section will only appear after analysis is complete
-                  if (analysisResult != null)
+                  if (_useGeminiAnalysis && textAnalysisState.analyzedText != null)
+                    GeminiResultsSection(analyzedText: textAnalysisState.analyzedText!),
+                  if (!_useGeminiAnalysis && analysisResult != null)
                     ResultsSection(analysisResult: analysisResult),
+                  // Show error if any
+                  if (textAnalysisState.error != null)
+                    Container(
+                      margin: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.red.withOpacity(0.3)),
+                      ),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.error, color: Colors.red),
+                          const SizedBox(height: 8),
+                          Text(
+                            textAnalysisState.error!,
+                            style: const TextStyle(color: Colors.red),
+                            textAlign: TextAlign.center,
+                          ),
+                          if (!textAnalysisState.isConfigured) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Please configure your Gemini API key in lib/services/gemini_service.dart',
+                              style: TextStyle(fontSize: 12, color: Colors.grey),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                 ],
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// --- Gemini Results Section ---
+class GeminiResultsSection extends ConsumerStatefulWidget {
+  final AnalyzedText analyzedText;
+  const GeminiResultsSection({super.key, required this.analyzedText});
+
+  @override
+  ConsumerState<GeminiResultsSection> createState() => _GeminiResultsSectionState();
+}
+
+class _GeminiResultsSectionState extends ConsumerState<GeminiResultsSection> {
+  int _selectedIndex = 0;
+  final List<String> _tabs = ['Highlighted Text', 'Keywords', 'Definitions'];
+
+  Widget _buildContent() {
+    switch (_selectedIndex) {
+      case 0: // Highlighted Text
+        return HighlightedTextWidget(
+          analyzedText: widget.analyzedText,
+          onKeywordLongPress: (keyword, definition) {
+            KeywordDefinitionPopup.show(context, keyword, definition);
+          },
+        );
+      case 1: // Keywords
+        return Wrap(
+          spacing: 8.0,
+          runSpacing: 4.0,
+          children: widget.analyzedText.keywords
+              .map((keyword) => GestureDetector(
+                    onTap: () {
+                      final definition = widget.analyzedText.getDefinition(keyword);
+                      if (definition != null) {
+                        KeywordDefinitionPopup.show(context, keyword, definition);
+                      }
+                    },
+                    child: Chip(
+                      label: Text(keyword),
+                      backgroundColor: const Color(0xFF7846EC).withOpacity(0.1),
+                    ),
+                  ))
+              .toList(),
+        );
+      case 2: // Definitions
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: widget.analyzedText.definitions.entries.map((entry) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.key,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF7846EC),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(entry.value),
+                ],
+              ),
+            );
+          }).toList(),
+        );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.symmetric(horizontal: 13, vertical: 20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.5),
+            spreadRadius: 2,
+            blurRadius: 5,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          // --- Your TabBar UI ---
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.grey[200],
+              borderRadius: BorderRadius.circular(25),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            child: Row(
+              children: List.generate(_tabs.length, (index) {
+                final bool isSelected = _selectedIndex == index;
+                return Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        _selectedIndex = index;
+                      });
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(
+                        milliseconds: 300,
+                      ), // Faster animation
+                      margin: const EdgeInsets.symmetric(horizontal: 5),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? const Color(0xFF9159DB)
+                            : Colors.transparent,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Center(
+                        child: Text(
+                          _tabs[index],
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.black,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            ),
+          ),
+          const Divider(height: 30),
+          // --- Content that changes based on the selected tab ---
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 400),
+            child: Align(
+              key: ValueKey(_selectedIndex), // Important for AnimatedSwitcher
+              alignment: Alignment.topLeft,
+              child: _buildContent(),
             ),
           ),
         ],
