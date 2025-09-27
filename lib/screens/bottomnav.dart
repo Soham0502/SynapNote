@@ -4,6 +4,8 @@ import 'package:sahayak_ui/screens/notes/notes.dart';
 import 'package:sahayak_ui/screens/settings/settings.dart';
 
 class BottomNavScreen extends StatefulWidget {
+  const BottomNavScreen({super.key});
+
   @override
   State<BottomNavScreen> createState() => _BottomNavScreenState();
 }
@@ -11,19 +13,12 @@ class BottomNavScreen extends StatefulWidget {
 class _BottomNavScreenState extends State<BottomNavScreen> {
   int currentIndex = 0;
 
-  final List<Widget> pages = [
-    Homescreen(), 
-    Notes(),
-    Settings(), 
-  ];
+  final List<Widget> pages = [HomeScreen(), Notes(), Settings()];
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: IndexedStack(
-        index: currentIndex,
-        children: pages,
-      ),
+      body: IndexedStack(index: currentIndex, children: pages),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: currentIndex,
         onTap: (index) {
@@ -33,7 +28,10 @@ class _BottomNavScreenState extends State<BottomNavScreen> {
         },
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'Home'),
-          BottomNavigationBarItem(icon: Icon(Icons.description), label: 'Notes'),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.description),
+            label: 'Notes',
+          ),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Settings'),
         ],
       ),

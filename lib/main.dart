@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:sahayak_ui/splash/splashscreen.dart';
+import 'package:sahayak_ui/screens/splash/splashscreen.dart';
 import 'package:sahayak_ui/utils/app_theme.dart';
 
 void main() {
@@ -7,7 +7,7 @@ void main() {
 }
 
 class SahayakApp extends StatelessWidget {
-  SahayakApp({super.key});
+  const SahayakApp({super.key});
 
   @override
   Widget build(BuildContext context) {
